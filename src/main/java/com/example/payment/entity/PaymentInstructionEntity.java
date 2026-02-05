@@ -33,7 +33,7 @@ public class PaymentInstructionEntity {
     @Column(name = "payee_account", nullable = false)
     private String payeeAccount;
 
-    @Column(name = "amount", nullable = false, precision = 19, scale = 4)
+    @Column(name = "amount", nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
 
     @Column(name = "currency", nullable = false, length = 3)

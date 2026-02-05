@@ -39,9 +39,4 @@ public class GlobalExceptionHandler {
                 .body(new ApiError("INTERNAL_ERROR", "Unexpected error", Instant.now()));
     }
 
-    @ExceptionHandler(BadRequestException.class)
-    public ResponseEntity<ApiError> handleBadRequest(BadRequestException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(new ApiError("BAD_REQUEST", ex.getMessage(), Instant.now()));
-    }
 }

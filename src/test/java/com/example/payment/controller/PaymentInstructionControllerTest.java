@@ -95,16 +95,17 @@ public class PaymentInstructionControllerTest {
     }
 
     @Test
-    void post_payerEqualsPayee_returns400() throws Exception {
-        var body = validRequest("INS-BAD-400");
+    void post_payerEqualsPayee_returns201_andRejectedStatus() throws Exception {
+        var body = validRequest("INS-BAD-REJECTED");
         body.put("payeeAccount", "ACC-1"); // same as payer
 
         mockMvc.perform(post("/payment-instructions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value(anyOf(is("BAD_REQUEST"), is("VALIDATION_ERROR"))))
-                .andExpect(jsonPath("$.message", containsString("must be different")));
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.instructionId").value("INS-BAD-REJECTED"))
+                .andExpect(jsonPath("$.status").value("REJECTED"))
+                .andExpect(jsonPath("$.failureReason", containsString("must be different")));
     }
 
     @Test
@@ -127,5 +128,22 @@ public class PaymentInstructionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.instructionId").value("INS-GET-200"))
                 .andExpect(jsonPath("$.status").value("VALIDATED"));
+    }
+
+    @Test
+    void post_rejected_then_get_returnsRejected() throws Exception {
+        var body = validRequest("INS-REJ-GET");
+        body.put("payeeAccount", "ACC-1");
+
+        mockMvc.perform(post("/payment-instructions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("REJECTED"));
+
+        mockMvc.perform(get("/payment-instructions/INS-REJ-GET"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"))
+                .andExpect(jsonPath("$.failureReason").exists());
     }
 }

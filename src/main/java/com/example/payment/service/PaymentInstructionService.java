@@ -1,12 +1,12 @@
 package com.example.payment.service;
 
+import com.example.payment.config.PaymentProperties;
 import com.example.payment.dto.PaymentInstructionRequest;
 import com.example.payment.dto.PaymentInstructionResponse;
 import com.example.payment.entity.PaymentEventType;
 import com.example.payment.entity.PaymentInstructionEntity;
 import com.example.payment.entity.PaymentInstructionEventEntity;
 import com.example.payment.entity.PaymentStatus;
-import com.example.payment.exception.BadRequestException;
 import com.example.payment.exception.ConflictException;
 import com.example.payment.exception.NotFoundException;
 import com.example.payment.repository.PaymentInstructionEventRepository;
@@ -31,10 +31,12 @@ public class PaymentInstructionService {
     private final PaymentInstructionRepository instructionRepo;
     private final PaymentInstructionEventRepository eventRepo;
 
+    private final PaymentProperties paymentProperties;
+
     @Transactional
     public SubmitResult submit(PaymentInstructionRequest req) {
 
-        // 1) Idempotency check
+        //Idempotency check
         var existingOpt = instructionRepo.findById(req.getInstructionId());
         if (existingOpt.isPresent()) {
             var existing = existingOpt.get();
@@ -51,10 +53,7 @@ public class PaymentInstructionService {
             throw new ConflictException("InstructionId already exists with different payload"); //throw 409
         }
 
-        //Business validation before save >400
-        validateBusinessRulesOrThrow(req);
-
-        //Persist new valid instruction
+        //Persist first as RECEIVED (durable record for audit/support)
         Instant now = Instant.now();
         PaymentInstructionEntity entity = new PaymentInstructionEntity();
         entity.setInstructionId(req.getInstructionId());
@@ -65,16 +64,37 @@ public class PaymentInstructionService {
         entity.setCurrency(req.getCurrency());
         entity.setRequestedExecutionDate(req.getRequestedExecutionDate());
 
-        entity.setStatus(PaymentStatus.VALIDATED);
+        entity.setStatus(PaymentStatus.RECEIVED);
         entity.setFailureReason(null);
         entity.setCreatedAt(now);
         entity.setUpdatedAt(now);
 
         instructionRepo.save(entity);
-        writeEvent(entity.getInstructionId(), PaymentEventType.CREATED, null, PaymentStatus.VALIDATED, "Instruction created (validated)");
+        writeEvent(entity.getInstructionId(), PaymentEventType.CREATED, null, PaymentStatus.RECEIVED, "Instruction received");
 
-        return new SubmitResult(toResponse(entity), true); //201
+
+        //Business validation > VALIDATED or REJECTED
+        String failure = validateBusinessRules(req);
+        if (failure != null) {
+            transition(entity, PaymentStatus.REJECTED, failure);
+            writeEvent(entity.getInstructionId(),
+                    PaymentEventType.VALIDATION_FAILED,
+                    PaymentStatus.RECEIVED,
+                    PaymentStatus.REJECTED,
+                    failure);
+        } else {
+            transition(entity, PaymentStatus.VALIDATED, null);
+            writeEvent(entity.getInstructionId(),
+                    PaymentEventType.STATUS_CHANGED,
+                    PaymentStatus.RECEIVED,
+                    PaymentStatus.VALIDATED,
+                    "Business validation passed");
+        }
+
+        instructionRepo.save(entity);
+        return new SubmitResult(toResponse(entity), true); // 201 Created
     }
+
 
     private static PaymentInstructionEntity getPaymentInstructionEntity(PaymentInstructionRequest req, Instant now) {
         PaymentInstructionEntity entity = new PaymentInstructionEntity();
@@ -106,20 +126,22 @@ public class PaymentInstructionService {
     }
 
 
-//    Return null when valid; otherwise return a reason for REJECTED.
-    private void validateBusinessRulesOrThrow(PaymentInstructionRequest req) {
+    //return null when valid. otherwise return a reason for REJECTED.
+    private String validateBusinessRules(PaymentInstructionRequest req) {
         if (Objects.equals(req.getPayerAccount(), req.getPayeeAccount())) {
-            throw new BadRequestException("payerAccount and payeeAccount must be different");
+            return "payerAccount and payeeAccount must be different";
         }
 
         LocalDate today = LocalDate.now();
         if (req.getRequestedExecutionDate().isBefore(today)) {
-            throw new BadRequestException("requestedExecutionDate must be today or later");
+            return "requestedExecutionDate must be today or later";
         }
 
-        if (!SUPPORTED_CURRENCIES.contains(req.getCurrency())) {
-            throw new BadRequestException("Unsupported currency: " + req.getCurrency());
+        if (!paymentProperties.getSupportedCurrencies().contains(req.getCurrency())) {
+            return "Unsupported currency: " + req.getCurrency();
         }
+
+        return null;
     }
 
     private boolean isSamePayload(PaymentInstructionEntity e, PaymentInstructionRequest r) {

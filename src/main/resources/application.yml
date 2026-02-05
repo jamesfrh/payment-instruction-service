@@ -25,3 +25,9 @@ spring:
     console:
       enabled: true
       path: /h2-console
+
+payment:
+  supported-currencies:
+    - SGD
+    - USD
+    - EUR
