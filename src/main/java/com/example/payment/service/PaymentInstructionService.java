@@ -26,7 +26,6 @@ import java.util.Set;
 @Service
 public class PaymentInstructionService {
 
-    private static final Set<String> SUPPORTED_CURRENCIES = Set.of("SGD", "MYR", "USD");
 
     private final PaymentInstructionRepository instructionRepo;
     private final PaymentInstructionEventRepository eventRepo;
